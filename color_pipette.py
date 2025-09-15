@@ -246,9 +246,18 @@ class PipetteApp:
         rx = max(0, min(self.screen_w - cw, int(x - cw / 2)))
         ry = max(0, min(self.screen_h - ch, int(y - ch / 2)))
         crop = pyautogui.screenshot(region=(rx, ry, cw, ch))
+        # Compute scale factor in case of Retina (crop image size may differ from requested cw,ch)
+        scale_cx = crop.width / float(cw) if cw > 0 else 1.0
+        scale_cy = crop.height / float(ch) if ch > 0 else 1.0
+        # Pixel position of (x,y) inside the crop image
+        px = int((x - rx) * scale_cx)
+        py = int((y - ry) * scale_cy)
+        # Clamp inside image
+        px = max(0, min(crop.width - 1, px))
+        py = max(0, min(crop.height - 1, py))
         d = ImageDraw.Draw(crop)
-        d.line([(cw // 2 - 8, ch // 2), (cw // 2 + 8, ch // 2)], fill=(0, 255, 0), width=2)
-        d.line([(cw // 2, ch // 2 - 8), (cw // 2, ch // 2 + 8)], fill=(0, 255, 0), width=2)
+        d.line([(px - 8, py), (px + 8, py)], fill=(0, 255, 0), width=2)
+        d.line([(px, py - 8), (px, py + 8)], fill=(0, 255, 0), width=2)
         crop_path = os.path.join(self.save_dir, f"pipette_crop_{ts}_{rx}x{ry}_{cw}x{ch}.png")
         crop.save(crop_path)
 
@@ -262,9 +271,17 @@ class PipetteApp:
                 self.root.deiconify()
             except Exception:
                 pass
+        # Account for potential Retina scale on full screenshot
+        scale_fx = fs.width / float(self.screen_w) if self.screen_w > 0 else 1.0
+        scale_fy = fs.height / float(self.screen_h) if self.screen_h > 0 else 1.0
+        fx = int(x * scale_fx)
+        fy = int(y * scale_fy)
+        # Clamp inside image
+        fx = max(0, min(fs.width - 1, fx))
+        fy = max(0, min(fs.height - 1, fy))
         d2 = ImageDraw.Draw(fs)
-        d2.line([(x - 12, y), (x + 12, y)], fill=(0, 255, 0), width=3)
-        d2.line([(x, y - 12), (x, y + 12)], fill=(0, 255, 0), width=3)
+        d2.line([(fx - 12, fy), (fx + 12, fy)], fill=(0, 255, 0), width=3)
+        d2.line([(fx, fy - 12), (fx, fy + 12)], fill=(0, 255, 0), width=3)
         max_w = 1600
         if fs.width > max_w:
             ratio = max_w / fs.width
@@ -277,7 +294,12 @@ class PipetteApp:
         self.paused = not self.paused
 
     def on_save(self, event=None):
-        x, y = self.last_pos
+        # Use real-time cursor position to avoid race with tick updates
+        try:
+            pos = pyautogui.position()
+            x, y = int(pos.x), int(pos.y)
+        except Exception:
+            x, y = self.last_pos
         rgb = self.avg_rgb(x, y)
         cp, fp = self._save_images(x, y, rgb or (0, 0, 0))
         env_block = self._env_lines(x, y, rgb)
