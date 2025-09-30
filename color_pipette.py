@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
+"""Color Pipette - инструмент для точного захвата координат и цветов на macOS.
+
+Учитывает Retina-масштабирование и предоставляет несколько методов замера:
+- native screencapture (рекомендуется для Retina)
+- direct pixel reading через pyautogui
+- усреднение по kxk области для стабильности
+"""
 import os
 import sys
 import time
 import argparse
 import tkinter as tk
 from tkinter import ttk
+import tempfile
 
 import pyautogui
 from PIL import Image, ImageTk, ImageDraw
@@ -41,6 +49,15 @@ def hex_of(rgb):
 
 
 class PipetteApp:
+    """Интерактивное приложение для захвата цветов и координат с учетом Retina.
+    
+    Особенности:
+    - Live preview с magnifier
+    - Усреднение цвета по kxk области (снижает шум)
+    - Переключение между native screencapture и pyautogui.pixel
+    - Сохранение координат и RGB в формате .env
+    - Диагностические инструменты для проверки точности
+    """
     def __init__(self, rate_hz: float = 30.0, save_dir: str = "debug", follow: bool = False, avg_k: int = 3,
                  info_backend: str = "capture", info_hz: float = 10.0, save_backend: str = "status",
                  auto_quit_seconds: float = 0.0):
@@ -337,23 +354,24 @@ class PipetteApp:
         ry = int(y - r)
         cw = int(k)
         ch = int(k)
-        tmp_path = None
         img = None
+        # Используем tempfile для безопасного создания временных файлов
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False, dir=self.save_dir) as tmp_file:
+            tmp_path = tmp_file.name
         try:
             os.makedirs(self.save_dir, exist_ok=True)
-            tmp_path = os.path.join(self.save_dir, f"_pipette_tmp_{int(time.time()*1000)}.png")
             cmd = ["screencapture", "-x", "-R", f"{rx},{ry},{cw},{ch}", tmp_path]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
             if res.returncode == 0 and os.path.exists(tmp_path):
                 try:
                     img = Image.open(tmp_path).convert('RGB')
                 except Exception:
                     img = None
-        except Exception:
+        except (Exception, subprocess.TimeoutExpired):
             img = None
         finally:
             try:
-                if tmp_path and os.path.exists(tmp_path):
+                if os.path.exists(tmp_path):
                     os.remove(tmp_path)
             except Exception:
                 pass
@@ -402,23 +420,25 @@ class PipetteApp:
             pass
         crop = None
         # 1) Пытаемся через нативный screencapture (чаще корректно маппит мульти-мониторы/ретину)
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False, dir=self.save_dir) as tmp_file:
+            tmp_path = tmp_file.name
         try:
             os.makedirs(self.save_dir, exist_ok=True)
-            tmp_path = os.path.join(self.save_dir, f"_pipette_tmp_{int(time.time()*1000)}.png")
             cmd = ["screencapture", "-x", "-R", f"{rx},{ry},{cw},{ch}", tmp_path]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
             if res.returncode == 0 and os.path.exists(tmp_path):
                 try:
                     crop = Image.open(tmp_path).convert('RGB')
                 except Exception:
                     crop = None
+        except (Exception, subprocess.TimeoutExpired):
+            crop = None
+        finally:
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
             except Exception:
                 pass
-        except Exception:
-            crop = None
         # 2) Фоллбэк — pyautogui
         if crop is None:
             try:
